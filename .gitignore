@@ -1,1 +1,6 @@
 resources/
+*.asv
+*.slxc
+*.original
+*.prj
+*slprj/
