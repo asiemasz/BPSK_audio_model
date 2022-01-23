@@ -40,7 +40,7 @@ classdef CostasLoop < matlab.System
 
         end
 
-        function [carrier, freq, phase, error, errorTot] = stepImpl(obj,input)
+        function [output, carrier, freq, phase, error, errorTot] = stepImpl(obj,input)
             % Implement algorithm. Caplculate y as a function of input u and
             % discrete states.
             obj.phase = obj.phase + obj.omega;
@@ -63,6 +63,7 @@ classdef CostasLoop < matlab.System
 
             obj.error = sim * sqm;
 
+            output = sim;
             carrier = si;
             phase = obj.phase;
             obj.errorTot = obj.errorTot + obj.error;
