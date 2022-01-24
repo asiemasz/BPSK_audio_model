@@ -27,7 +27,7 @@ classdef calculateBER < matlab.System
             % Implement algorithm. Calculate y as a function of input u and
             % discrete states.
             x = find(in1==in2);
-            ber = 1 - length(x)/length(in1);
+            ber = 1 - length(x)/max([length(in1) length(in2)]);
         end
 
         function resetImpl(obj)
