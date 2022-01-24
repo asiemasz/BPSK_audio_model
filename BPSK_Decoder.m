@@ -29,14 +29,13 @@ classdef BPSK_Decoder < matlab.System
             % Implement algorithm. Calculate y as a function of input u and
             % discrete states.
             if(length(idx) > 0)
-                figure; plot(input);figure; plot(idx); title('idx');
                 y = zeros(length(idx)*8, 1);
                 spb = obj.samplesPerBit;
                 k = 1;
                 for i = 1:length(idx)
-                    if(idx+spb*8 < obj.inputBufferSize)
+                    if(idx(i)+spb*8 < obj.inputBufferSize && idx(i) > 0)
                         for j = 0:spb:spb*7
-                            if sum(input(idx(i)+j:idx(i)+j+spb-1)) < 0
+                            if sum(input(idx(i)+j:idx(i)+j+obj.samplesPerBit)) < 0
                                 y(k) = 1;
                             else
                                 y(k) = 0;
@@ -45,7 +44,6 @@ classdef BPSK_Decoder < matlab.System
                         end
                     end
                 end
-                figure; plot(y); title('result');
             else 
                 y = 0;
             end
@@ -57,7 +55,7 @@ classdef BPSK_Decoder < matlab.System
 
 
         function sizeout = getOutputSizeImpl(~)
-            sizeout = [500, 1];
+            sizeout = [2000, 1];
         end
 
         function datatype = getOutputDataTypeImpl(~)
