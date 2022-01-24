@@ -33,14 +33,37 @@ classdef SymbolStartPreambleDetector < matlab.System
             idx = zeros(obj.maxSymbolsNum, 1);
             corr = xcorr(input, obj.barkerCode_);
             corr = corr(obj.inputBufferLength-1:end);
-            figure; plot(input); figure; plot((corr));
-            max_ = max(corr);           
-            [pks, locs] = findpeaks(corr, 'MinPeakHeight',0.6 * max_,'MinPeakDistance', obj.samplesPerBit * (8 + length(obj.barkerCode)) - 20);
-            locs = locs + length(obj.barkerCode) * obj.samplesPerBit;
-            idx = locs;
+            absMax = max(corr);           
+            %[pks, locs] = findpeaks(corr, 'MinPeakHeight',0.5 * max_,'MinPeakDistance', obj.samplesPerBit * (8 + length(obj.barkerCode)) - obj.samplesPerBit/2);
+            %locs = locs + length(obj.barkerCode) * obj.samplesPerBit;
+            %idx = locs;
+            i = 1;
+            k = 1;
+            locked = false;
+            while i < obj.inputBufferLength - (obj.symbolLength + length(obj.barkerCode)) * obj.samplesPerBit 
+                if ~locked
+                    [currMax, currIdx] = max(corr(i:i + obj.symbolLength * obj.samplesPerBit));
+                    if currMax > 0.5 * absMax
+                        locked = true;
+                        idx(k) = i + currIdx + length(obj.barkerCode) * obj.samplesPerBit;
+                        i = idx(k) + obj.symbolLength * obj.samplesPerBit;
+                        k = k + 1;
+                    else
+                        i = i + obj.symbolLength * obj.samplesPerBit;
+                    end
+                else
+                    [currMax, currIdx] = max(corr(i-obj.samplesPerBit:i+obj.samplesPerBit));
+                    if currMax > 0.5 * absMax
+                        idx(k) = i - obj.samplesPerBit + currIdx + length(obj.barkerCode) * obj.samplesPerBit;
+                        i = idx(k) + obj.symbolLength * obj.samplesPerBit;
+                        k = k + 1;
+                    else
+                        locked = false;
+                        i = i + obj.samplesPerBit;
+                    end
+                end
+            end
             obj.processedBuffers = obj.processedBuffers + 1;
-            length(idx)
-
         end 
 
         function resetImpl(obj)
