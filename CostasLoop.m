@@ -3,35 +3,29 @@ classdef CostasLoop < matlab.System
 
     % Public, tunable properties
     properties
-        alpha = 0.1;
-        beta = 0.1 * 0.1 / 4;
-        A = [1.0 -0.5095254494944288];
-        B = [0.2452372752527856 0.2452372752527856];
-        FC = 8000;
-        FS = 48000;
+        alpha = 0.25;
+        beta = 0.25 * 0.25 / 4;
+        lpf_coeffs =  [0.078989, 0.085868, 0.091518, 0.095721, 0.098311, 0.099186, 0.098311, 0.095721, 0.09151, 0.085868, 0.078989];
+        Fc = 8e3;
+        Fs = 48e3;
+        REF_PERIOD = 1e6/8e3;
+        SAMPLE_PERIOD = 1e6/48e3;
+        intgralf = 1.2 * 0.25 / 1e6/8e3;
     end
 
     properties(DiscreteState)
-        omega;
-        error;
         phase;
-        errorTot;
+        period;
+        f;
+        error_int;
     end
 
     % Pre-computed constants
     properties(Access = private)
-        buf_A_I;
-        buf_B_I;
-        pos_A_I;
-        pos_B_I;
-        n_A_I;
-        n_B_I;
-        buf_A_Q;
-        buf_B_Q;
-        pos_A_Q;
-        pos_B_Q;
-        n_A_Q;
-        n_B_Q;
+        buf_lpf_I;
+        buf_idx_I;
+        buf_lpf_Q;
+        buf_idx_Q;
     end
 
     methods(Access = protected)
@@ -40,110 +34,84 @@ classdef CostasLoop < matlab.System
 
         end
 
-        function [output, carrier, freq, phase, error, errorTot] = stepImpl(obj,input)
-            % Implement algorithm. Caplculate y as a function of input u and
-            % discrete states.
-            obj.phase = obj.phase + obj.omega;
-            obj.phase = obj.phase + obj.alpha * obj.error;
+        function [S_I,S_Q,lock, ask, error] = stepImpl(obj,input)
+            output = zeros(length(input), 1);
 
-            obj.omega = obj.omega + obj.beta * obj.error;
+            for i=1:length(input)
+                S = input(i);
+                obj.f = obj.f + obj.SAMPLE_PERIOD * 2 * pi / obj.period;
+    
+                if(obj.f > 2 * pi)
+                    obj.f = obj.f - 2 * pi;
+                end
 
-            freq = obj.omega * obj.FS / (2 * pi);
-            if(obj.phase > 2*pi)
-                obj.phase = obj.phase - 2*pi;
+                I = cos(obj.f + obj.phase);
+                Q = -sin(obj.f + obj.phase);
+                S_I = obj.I_filter_step(S * I);
+                S_Q = obj.Q_filter_step(S * Q);
+                error = sign(S_I) * S_Q;
+                output(i) = S_I;
+                obj.error_int = obj.error_int + error * obj.SAMPLE_PERIOD;
+                error = error + obj.error_int * obj.intgralf;
+                obj.phase = obj.phase + obj.alpha * error;
+                obj.period = obj.period - obj.beta * error;
+                lock = S_I * S_I - S_Q * S_Q;
+                ask = S_I * S_I - S_Q * S_Q;
             end
             
-            si = cos(obj.phase);
-            sq = -sin(obj.phase);
-
-            sim = si*input;
-            sqm = sq*input;
-            sim = obj.I_filter_step(sim);
-            sqm = obj.Q_filter_step(sqm);
-
-            obj.error = sim * sqm;
-
-            output = sim;
-            carrier = si;
-            phase = obj.phase;
-            obj.errorTot = obj.errorTot + obj.error;
-            error = obj.error;
-            errorTot = obj.errorTot;
         end
 
         function resetImpl(obj)
             % Initialize / reset discrete-state properties
-            
-            %Simple stepping filter stuff
-            obj.n_A_I = length(obj.A) - 1;
-            obj.buf_A_I = zeros(obj.n_A_I);
-            obj.n_B_I = length(obj.B) - 1;
-            obj.buf_B_I = zeros(obj.n_B_I);
-            obj.pos_A_I = 0;
-            obj.pos_B_I = 0;
-            obj.n_A_Q = length(obj.A) - 1;
-            obj.buf_A_Q = zeros(obj.n_A_Q);
-            obj.n_B_Q = length(obj.B) - 1;
-            obj.buf_B_Q = zeros(obj.n_B_Q);
-            obj.pos_A_Q = 0;
-            obj.pos_B_Q = 0;
+            obj.error_int = 0;
+            obj.period = 1e6 / obj.Fc;
+            obj.f = - (1e6/obj.Fs)* 2 * pi / (1e6/obj.Fc); 
+            obj.phase = pi/2;
 
-            obj.errorTot = 0;
-            obj.error = 0;
-            obj.phase = 0;
-            obj.omega = 2*pi*obj.FC/obj.FS;
+            % Simple FIR filter stuff
+            obj.buf_lpf_I = zeros(length(obj.lpf_coeffs),1);
+            obj.buf_lpf_Q = zeros(length(obj.lpf_coeffs),1);
+            obj.buf_idx_I = 1;
+            obj.buf_idx_Q = 1;
         end
 
         function res = I_filter_step(obj, val)
-            acc = obj.B(1) * val;
-
-            for i = 1:obj.n_B_I 
-                p = mod((obj.pos_B_I + obj.n_B_I - i), obj.n_B_I); 
-                acc = acc + obj.B(i+1) * obj.buf_B_I(p+1);
+            obj.buf_lpf_I(obj.buf_idx_I) = val;
+            obj.buf_idx_I = obj.buf_idx_I + 1;
+            obj.buf_idx_I = mod(obj.buf_idx_I, length(obj.lpf_coeffs) + 1);
+            if(obj.buf_idx_I == 0)
+                obj.buf_idx_I = 1;
             end
 
-            for i = 1:obj.n_A_I
-                p = mod((obj.pos_A_I + obj.n_A_I - i), obj.n_A_I); 
-                acc = acc - obj.A(i+1) * obj.buf_A_I(p+1);
-            end   
-
-            if obj.n_B_I > 0
-                obj.buf_B_I(obj.pos_B_I+1) = val;
-                obj.pos_B_I = mod(obj.pos_B_I + 1, obj.n_B_I);
+            ret = 0;
+            index = obj.buf_idx_I;
+            for i=1:length(obj.lpf_coeffs)
+                index = index - 1;
+                if(index < 1)
+                    index = length(obj.lpf_coeffs);
+                end
+                ret = ret + obj.buf_lpf_I(index) * obj.lpf_coeffs(i);
             end
-
-            if obj.n_A_I > 0
-                obj.buf_A_I(obj.pos_A_I+1) = val;
-                obj.pos_A_I = mod(obj.pos_A_I + 1, obj.n_A_I);
-            end
-
-            res = acc;
+            res = ret;
         end
 
         function res = Q_filter_step(obj, val)
-            acc = obj.B(1) * val;
-
-            for i = 1:obj.n_B_Q 
-                p = mod((obj.pos_B_Q + obj.n_B_Q - i), obj.n_B_Q); 
-                acc = acc + obj.B(i+1) * obj.buf_B_Q(p+1);
+            obj.buf_lpf_Q(obj.buf_idx_Q) = val;
+            obj.buf_idx_Q = obj.buf_idx_Q + 1;
+            obj.buf_idx_Q = mod(obj.buf_idx_Q, length(obj.lpf_coeffs) + 1);
+            if(obj.buf_idx_Q == 0)
+                obj.buf_idx_Q = 1;
             end
-
-            for i = 1:obj.n_A_Q
-                p = mod((obj.pos_A_Q + obj.n_A_Q - i), obj.n_A_Q); 
-                acc = acc - obj.A(i+1) * obj.buf_A_Q(p+1);
-            end   
-
-            if obj.n_B_Q > 0
-                obj.buf_B_Q(obj.pos_B_Q+1) = val;
-                obj.pos_B_Q = mod(obj.pos_B_Q + 1, obj.n_B_Q);
+            ret = 0;
+            index = obj.buf_idx_Q;
+            for i=1:length(obj.lpf_coeffs)
+                index = index - 1;
+                if(index < 1)
+                    index = length(obj.lpf_coeffs);
+                end
+                ret = ret + obj.buf_lpf_Q(index) * obj.lpf_coeffs(i);
             end
-
-            if obj.n_A_Q > 0
-                obj.buf_A_Q(obj.pos_A_Q+1) = val;
-                obj.pos_A_Q = mod(obj.pos_A_Q + 1, obj.n_A_Q);
-            end
-
-            res = acc;
+            res = ret;
         end
     end
 end
